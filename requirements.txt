@@ -1,5 +1,5 @@
 streamlit==1.37.1
-markitdown[all]==0.1.6
+markitdown[docx,pdf,pptx,xls,xlsx]==0.1.6
 openai==2.30.0
 python-dotenv==1.0.1
 PyMuPDF==1.26.3
