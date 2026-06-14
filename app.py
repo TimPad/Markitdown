@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import streamlit as st
@@ -9,6 +10,10 @@ from services.document_router import DocumentRouter
 from services.markitdown_service import MarkItDownService
 from services.nebius_ocr_service import NebiusOCRService
 from services.validation_service import SUPPORTED_EXTENSIONS, validate_file
+
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 st.set_page_config(
@@ -28,6 +33,7 @@ def get_router() -> DocumentRouter:
             base_url=settings.nebius_base_url,
             model=settings.nebius_ocr_model,
             timeout=settings.ocr_timeout_seconds,
+            max_tokens=settings.ocr_max_tokens,
         ),
     )
 
@@ -107,16 +113,21 @@ if uploaded_file is not None:
             st.session_state["markdown"] = result.markdown
             st.session_state["method"] = result.method
             st.session_state["warnings"] = result.warnings
+            st.session_state["info"] = result.info
             st.session_state["output_name"] = f"{Path(uploaded_file.name).stem}.md"
 
             progress_bar.progress(1.0)
             status.success(f"Готово. Метод: {result.method}")
 
         except Exception as exc:
-            status.error("Не удалось обработать документ.")
-            st.exception(exc)
+            logger.exception("Не удалось обработать документ %s", uploaded_file.name)
+            status.error(f"Не удалось обработать документ: {exc}")
 
 if "markdown" in st.session_state:
+    if st.session_state.get("info"):
+        for note in st.session_state["info"]:
+            st.info(note)
+
     if st.session_state.get("warnings"):
         for warning in st.session_state["warnings"]:
             st.warning(warning)

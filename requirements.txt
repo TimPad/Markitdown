@@ -1,7 +1,7 @@
-streamlit>=1.40
-markitdown[all]>=0.1.0
-openai>=1.60
-python-dotenv>=1.0
-PyMuPDF>=1.24
-Pillow>=10.0
-tenacity>=8.2
+streamlit==1.37.1
+markitdown[all]==0.1.6
+openai==2.30.0
+python-dotenv==1.0.1
+PyMuPDF==1.26.3
+Pillow==10.4.0
+tenacity==8.2.3

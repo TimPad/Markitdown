@@ -1,4 +1,8 @@
 import unittest
+from io import BytesIO
+
+import fitz
+from PIL import Image
 
 from services.document_router import DocumentRouter
 
@@ -66,6 +70,68 @@ class DocumentRouterTest(unittest.TestCase):
     def test_page_range_parser_rejects_out_of_bounds_pages(self):
         with self.assertRaisesRegex(ValueError, "за пределами"):
             DocumentRouter.parse_page_range("1-12", total_pages=10)
+
+
+def _build_hybrid_pdf() -> bytes:
+    """Страница 1 — пустая (скан), страницы 2 и 3 — цифровые."""
+    document = fitz.open()
+    document.new_page()
+    for index in (2, 3):
+        page = document.new_page()
+        page.insert_text((72, 72), f"Digital page {index} with a sufficient amount of text. " * 3)
+    data = document.tobytes()
+    document.close()
+    return data
+
+
+def _build_multiframe_tiff() -> bytes:
+    frames = [Image.new("RGB", (20, 20), color=color) for color in ("red", "green", "blue")]
+    buffer = BytesIO()
+    frames[0].save(buffer, format="TIFF", save_all=True, append_images=frames[1:])
+    return buffer.getvalue()
+
+
+class DocumentRouterHybridTest(unittest.TestCase):
+    def test_hybrid_uses_markitdown_for_digital_pages(self):
+        markitdown = FakeMarkItDownService()
+        ocr = FakeOCRService()
+        router = DocumentRouter(markitdown, ocr)
+
+        result = router.convert(
+            file_bytes=_build_hybrid_pdf(),
+            filename="doc.pdf",
+            mode="Автоматически",
+            language="Russian",
+            dpi=72,
+            max_pages=10,
+        )
+
+        self.assertEqual(result.method, "hybrid")
+        # OCR вызван только для сканированной страницы 1.
+        self.assertEqual([page for page, _ in ocr.calls], [1])
+        # Цифровые страницы 2 и 3 прошли через MarkItDown.
+        self.assertEqual([call[2] for call in markitdown.calls], [[2], [3]])
+        self.assertTrue(result.info)
+        self.assertIn("[2, 3]", result.info[0])
+
+    def test_multiframe_tiff_recognizes_all_frames(self):
+        ocr = FakeOCRService()
+        router = DocumentRouter(FakeMarkItDownService(), ocr)
+
+        result = router.convert(
+            file_bytes=_build_multiframe_tiff(),
+            filename="scan.tiff",
+            mode="Принудительный OCR",
+            language="auto",
+            dpi=72,
+            max_pages=10,
+        )
+
+        self.assertEqual(result.method, "nebius_ocr")
+        # Все три кадра отправлены в OCR.
+        self.assertEqual([page for page, _ in ocr.calls], [1, 2, 3])
+        # Кадр 2 у фейка падает → предупреждение.
+        self.assertTrue(any("Страница 2" in warning for warning in result.warnings))
 
 
 if __name__ == "__main__":

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import base64
+import logging
 from io import BytesIO
 
 from tenacity import retry, stop_after_attempt, wait_exponential
+
+
+logger = logging.getLogger(__name__)
 
 
 SYSTEM_PROMPT = """Ты OCR-движок для конвертации документов в Markdown.
@@ -19,10 +23,12 @@ class NebiusOCRService:
         base_url: str,
         model: str,
         timeout: int = 120,
+        max_tokens: int = 8192,
     ) -> None:
         from openai import OpenAI
 
         self.model = model
+        self.max_tokens = max_tokens
         self.client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
 
     @staticmethod
@@ -47,9 +53,11 @@ class NebiusOCRService:
             "Верни результат в Markdown."
         )
 
+        logger.info("OCR page %s (language=%s)", page_number, language)
         response = self.client.chat.completions.create(
             model=self.model,
             temperature=0,
+            max_tokens=self.max_tokens,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {

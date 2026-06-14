@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 from typing import Callable
 
+
+logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[int, int], None]
 
@@ -14,6 +17,7 @@ class ConversionResult:
     markdown: str
     method: str
     warnings: list[str] = field(default_factory=list)
+    info: list[str] = field(default_factory=list)
 
 
 class DocumentRouter:
@@ -142,7 +146,7 @@ class DocumentRouter:
 
         return self._convert_pdf_hybrid(
             file_bytes=file_bytes,
-            page_texts=page_texts,
+            filename=filename,
             selected_pages=selected_pages,
             scanned_pages=scanned_pages,
             language=language,
@@ -156,20 +160,34 @@ class DocumentRouter:
         language: str,
         progress_callback: ProgressCallback | None,
     ) -> ConversionResult:
-        from PIL import Image
+        from PIL import Image, ImageSequence
 
-        image = Image.open(BytesIO(file_bytes)).convert("RGB")
+        source = Image.open(BytesIO(file_bytes))
+        frames = [frame.convert("RGB") for frame in ImageSequence.Iterator(source)]
+        total = len(frames)
         warnings: list[str] = []
-        try:
-            markdown = self.ocr_service.recognize_page(image, 1, language)
-        except Exception as exc:
-            markdown = ""
-            warnings.append(f"Страница 1: OCR не выполнен: {exc}")
+        parts: list[str] = []
 
-        if progress_callback:
-            progress_callback(1, 1)
+        for page_number, image in enumerate(frames, start=1):
+            try:
+                markdown = self.ocr_service.recognize_page(image, page_number, language)
+            except Exception as exc:
+                markdown = ""
+                warnings.append(f"Страница {page_number}: OCR не выполнен: {exc}")
 
-        return ConversionResult(markdown=markdown, method="nebius_ocr", warnings=warnings)
+            if total > 1:
+                parts.append(f"<!-- page: {page_number} -->\n\n{markdown}")
+            else:
+                parts.append(markdown)
+
+            if progress_callback:
+                progress_callback(page_number, total)
+
+        return ConversionResult(
+            markdown="\n\n---\n\n".join(parts),
+            method="nebius_ocr",
+            warnings=warnings,
+        )
 
     def _convert_pdf_pages_with_ocr(
         self,
@@ -206,7 +224,7 @@ class DocumentRouter:
     def _convert_pdf_hybrid(
         self,
         file_bytes: bytes,
-        page_texts: list[str],
+        filename: str,
         selected_pages: list[int],
         scanned_pages: set[int],
         language: str,
@@ -216,6 +234,7 @@ class DocumentRouter:
         from services.pdf_service import render_pdf_pages
 
         ocr_pages = [page for page in selected_pages if page in scanned_pages]
+        digital_pages = [page for page in selected_pages if page not in scanned_pages]
         rendered_by_page = {
             page_number: image
             for page_number, image in render_pdf_pages(file_bytes, dpi=dpi, pages=ocr_pages)
@@ -234,14 +253,23 @@ class DocumentRouter:
                     markdown = f"[OCR не выполнен для страницы {page_number}]"
                     warnings.append(f"Страница {page_number}: OCR не выполнен: {exc}")
             else:
-                markdown = page_texts[page_number - 1]
+                markdown = self.markitdown_service.convert(
+                    file_bytes, filename, pages=[page_number]
+                )
 
             parts.append(f"<!-- page: {page_number} -->\n\n{markdown}")
             if progress_callback:
                 progress_callback(index, total)
 
+        logger.info(
+            "Hybrid PDF: %s OCR pages, %s digital pages", len(ocr_pages), len(digital_pages)
+        )
         return ConversionResult(
             markdown="\n\n---\n\n".join(parts),
             method="hybrid",
             warnings=warnings,
+            info=[
+                f"Распознано OCR: страницы {ocr_pages}; "
+                f"через MarkItDown: {digital_pages}"
+            ],
         )

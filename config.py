@@ -18,6 +18,7 @@ class Settings:
     ocr_max_pages: int
     ocr_render_dpi: int
     ocr_timeout_seconds: int
+    ocr_max_tokens: int
 
 
 def _secret_or_env(name: str, default: str = "") -> str:
@@ -72,4 +73,5 @@ def get_settings(require_api_key: bool = True) -> Settings:
         ocr_max_pages=_int_setting("OCR_MAX_PAGES", 100),
         ocr_render_dpi=_int_setting("OCR_RENDER_DPI", 180),
         ocr_timeout_seconds=_int_setting("OCR_TIMEOUT_SECONDS", 120),
+        ocr_max_tokens=_int_setting("OCR_MAX_TOKENS", 8192),
     )
